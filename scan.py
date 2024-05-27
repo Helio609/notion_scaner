@@ -81,7 +81,7 @@ class Scaner:
             block = q.get()
 
             if block["has_children"]:
-                print(f'BlockId({block["type"]}): {block["id"]} has children')
+                # print(f'BlockId({block["type"]}): {block["id"]} has children')
                 has_more = True
                 next_cursor = None
                 while has_more:
@@ -98,7 +98,7 @@ class Scaner:
                         has_more = False
 
             if "rich_text" in block[block["type"]]:
-                print(f'BlockId({block["type"]}): {block["id"]} has rich text')
+                # print(f'BlockId({block["type"]}): {block["id"]} has rich text')
                 word_cnt += sum(
                     [
                         len(rich_text["plain_text"])
@@ -107,7 +107,7 @@ class Scaner:
                 )
 
             if block["type"] == "child_database":
-                print(f'BlockId({block["type"]}): {block["id"]} is a child database')
+                # print(f'BlockId({block["type"]}): {block["id"]} is a child database')
                 b_cnt, w_cnt = self.__process_database(block["id"])
                 block_cnt += b_cnt
                 word_cnt += w_cnt
