@@ -30,9 +30,13 @@ class Scaner:
             .limit(1)
             .maybe_single()
             .execute()
-            .data
         )
-        return last_record["block_cnt"], last_record["word_cnt"]
+
+        if last_record:
+            return last_record.data["block_cnt"], last_record.data["word_cnt"]
+        
+        return None
+        
 
     def __insert(self, plan_id: str, block_cnt: int, word_cnt: int):
         self.__supabase.table("statistics").insert(
@@ -150,7 +154,8 @@ class Scaner:
             plan_id, id = plan["id"], plan["root_block"]
             block_cnt, word_cnt = self.__run(id)
 
-            if (block_cnt, word_cnt) != self.__last_record(plan_id):
+            last_record = self.__last_record(plan_id)
+            if not last_record or (block_cnt, word_cnt) != last_record:
                 self.__insert(plan_id, block_cnt, word_cnt)
 
             print(f"Plan {plan_id} done.")
