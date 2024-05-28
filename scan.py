@@ -21,6 +21,19 @@ class Scaner:
             self.__supabase.table("plans").select("id, root_block").execute().data
         )
 
+    def __last_record(self, plan_id: str):
+        last_record = (
+            self.__supabase.table("statistics")
+            .select("block_cnt, word_cnt")
+            .eq("plan_id", plan_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+            .data
+        )
+        return last_record["block_cnt"], last_record["word_cnt"]
+
     def __insert(self, plan_id: str, block_cnt: int, word_cnt: int):
         self.__supabase.table("statistics").insert(
             {
@@ -136,8 +149,11 @@ class Scaner:
         for plan in self.__plans:
             plan_id, id = plan["id"], plan["root_block"]
             block_cnt, word_cnt = self.__run(id)
-            self.__insert(plan_id, block_cnt, word_cnt)
-            print(f"Plan {plan_id} done, {block_cnt} blocks and {word_cnt} words.")
+
+            if (block_cnt, word_cnt) != self.__last_record(plan_id):
+                self.__insert(plan_id, block_cnt, word_cnt)
+
+            print(f"Plan {plan_id} done.")
 
 
 if __name__ == "__main__":
