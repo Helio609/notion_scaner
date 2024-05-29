@@ -13,18 +13,18 @@ class DetectedType(Enum):
 
 
 class Scaner:
-    def __init__(self, auth: str, supabase_url: str, supabase_key: str) -> None:
-        self.__notion_client: NotionClient = NotionClient(auth=auth)
+    def __init__(self, supabase_url: str, supabase_key: str) -> None:
+        self.__notion_client: NotionClient = None
         self.__supabase: Supabase = create_client(supabase_url, supabase_key)
 
         self.__plans = (
-            self.__supabase.table("plans").select("id, root_block").execute().data
+            self.__supabase.table("plans").select("id, root_id, notion_auth").execute().data
         )
 
     def __last_record(self, plan_id: str):
         last_record = (
             self.__supabase.table("statistics")
-            .select("block_cnt, word_cnt")
+            .select("blocks, words")
             .eq("plan_id", plan_id)
             .order("created_at", desc=True)
             .limit(1)
@@ -33,17 +33,16 @@ class Scaner:
         )
 
         if last_record:
-            return last_record.data["block_cnt"], last_record.data["word_cnt"]
-        
+            return last_record.data["blocks"], last_record.data["words"]
+
         return None
-        
 
     def __insert(self, plan_id: str, block_cnt: int, word_cnt: int):
         self.__supabase.table("statistics").insert(
             {
                 "plan_id": plan_id,
-                "block_cnt": block_cnt,
-                "word_cnt": word_cnt,
+                "blocks": block_cnt,
+                "words": word_cnt,
             }
         ).execute()
 
@@ -151,25 +150,32 @@ class Scaner:
 
     def run(self):
         for plan in self.__plans:
-            plan_id, id = plan["id"], plan["root_block"]
-            block_cnt, word_cnt = self.__run(id)
+            plan_id, id, notion_auth = plan["id"], plan["root_id"], plan["notion_auth"]
 
-            last_record = self.__last_record(plan_id)
-            if not last_record or (block_cnt, word_cnt) != last_record:
-                self.__insert(plan_id, block_cnt, word_cnt)
+            try:
+                # Init notion client here
+                self.__notion_client = NotionClient(auth=notion_auth)
 
-            print(f"Plan {plan_id} done.")
+                block_cnt, word_cnt = self.__run(id)
+
+                last_record = self.__last_record(plan_id)
+
+                if not last_record or (block_cnt, word_cnt) != last_record:
+                    self.__insert(plan_id, block_cnt, word_cnt)
+
+                print(f"Plan {plan_id} done.")
+            except Exception as e:
+                print(e)
 
 
 if __name__ == "__main__":
     load_dotenv()
 
-    NOTION_AUTH = getenv("NOTION_AUTH")
     SUPABASE_URL = getenv("SUPABASE_URL")
     SUPABASE_KEY = getenv("SUPABASE_KEY")
 
-    if not NOTION_AUTH or not SUPABASE_URL or not SUPABASE_KEY:
+    if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError("Please provide env vars")
 
-    scaner = Scaner(NOTION_AUTH, SUPABASE_URL, SUPABASE_KEY)
+    scaner = Scaner(SUPABASE_URL, SUPABASE_KEY)
     scaner.run()
