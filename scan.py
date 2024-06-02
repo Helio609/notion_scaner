@@ -72,6 +72,11 @@ class Scaner:
             }
         ).execute()
 
+    def __update_last_error(self, plan_id: str, error: str | None):
+        self.__supabase.table("plans").update({"last_error": error}).eq(
+            "id", plan_id
+        ).execute()
+
     @sleep_decorator
     def __retrieve_block(self, id: str):
         return self.__notion_client.blocks.retrieve(id)
@@ -209,6 +214,7 @@ class Scaner:
                         self.__insert(plan_id, block_cnt, word_cnt)
 
                 print(f"Plan {plan_id} done.")
+                self.__last_record(plan_id, None)
             except Exception as e:
                 if isinstance(e, APIResponseError):
                     if (
@@ -217,11 +223,13 @@ class Scaner:
                     ):
                         print("Notion client fatal: ", end="")
                         print(e)
+                        self.__update_last_error(plan_id, str(e))
                         continue
 
                 if "retry" in plan and plan["retry"] == 3:
                     print("Retry fatal: ", end="")
                     print(e)
+                    self.__update_last_error(plan_id, str(e))
                     continue
 
                 retry = plan["retry"] + 1 if "retry" in plan else 1
