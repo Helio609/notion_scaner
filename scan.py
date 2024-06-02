@@ -214,7 +214,7 @@ class Scaner:
                         self.__insert(plan_id, block_cnt, word_cnt)
 
                 print(f"Plan {plan_id} done.")
-                self.__last_record(plan_id, None)
+                self.__update_last_error(plan_id, None)
             except Exception as e:
                 if isinstance(e, APIResponseError):
                     if (
