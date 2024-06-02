@@ -1,9 +1,16 @@
-from notion_client import Client as NotionClient
-from supabase import create_client, Client as Supabase
-from os import getenv
-from dotenv import load_dotenv
+import functools
 from enum import Enum
+from os import getenv
 from queue import Queue
+from random import shuffle
+from time import sleep
+
+from dotenv import load_dotenv
+from notion_client import APIResponseError
+from notion_client import Client as NotionClient
+from notion_client.errors import APIErrorCode
+from supabase import Client as Supabase
+from supabase import create_client
 
 
 class DetectedType(Enum):
@@ -12,14 +19,33 @@ class DetectedType(Enum):
     NONE = 3
 
 
+def sleep_decorator(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        sleep(0.35)
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 class Scaner:
     def __init__(self, supabase_url: str, supabase_key: str) -> None:
         self.__notion_client: NotionClient = None
         self.__supabase: Supabase = create_client(supabase_url, supabase_key)
 
-        self.__plans = (
-            self.__supabase.table("plans").select("id, root_id, notion_auth").execute().data
+        self.__plans = Queue()
+
+        plans = (
+            self.__supabase.table("plans")
+            .select("id, root_id, notion_auth")
+            .execute()
+            .data
         )
+
+        shuffle(plans)
+
+        for plan in plans:
+            self.__plans.put(plan)
 
     def __last_record(self, plan_id: str):
         last_record = (
@@ -46,8 +72,28 @@ class Scaner:
             }
         ).execute()
 
+    @sleep_decorator
+    def __retrieve_block(self, id: str):
+        return self.__notion_client.blocks.retrieve(id)
+
+    @sleep_decorator
+    def __list_block_children(
+        self, block_id: str, next_cursor: str = None, page_size: int = 100
+    ):
+        return self.__notion_client.blocks.children.list(
+            block_id=block_id, next_cursor=next_cursor, page_size=page_size
+        )
+
+    @sleep_decorator
+    def __query_database(
+        self, database_id: str, next_cursor: str = None, page_size: int = 100
+    ):
+        return self.__notion_client.databases.query(
+            database_id=database_id, start_cursor=next_cursor, page_size=page_size
+        )
+
     def __dectect(self, id: str):
-        block = self.__notion_client.blocks.retrieve(id)
+        block = self.__retrieve_block(id)
 
         if block["type"] == "child_database":
             return DetectedType.DATABASE
@@ -62,9 +108,8 @@ class Scaner:
         has_more = True
         next_cursor = None
         while has_more:
-            database = self.__notion_client.databases.query(
-                database_id, next_cursor=next_cursor, page_size=100
-            )
+            print(f"Database {database_id} has more")
+            database = self.__query_database(database_id, next_cursor=next_cursor)
             if database["has_more"]:
                 next_cursor = database["next_cursor"]
             else:
@@ -83,9 +128,8 @@ class Scaner:
         next_cursor = None
 
         while has_more:
-            blocks = self.__notion_client.blocks.children.list(
-                block_id=block_id, next_cursor=next_cursor, page_size=100
-            )
+            print(f"Block {block_id} has more")
+            blocks = self.__list_block_children(block_id, next_cursor=next_cursor)
             for block in blocks["results"]:
                 q.put(block)
             if blocks["has_more"]:
@@ -97,14 +141,13 @@ class Scaner:
             block = q.get()
 
             if block["has_children"]:
-                # print(f'BlockId({block["type"]}): {block["id"]} has children')
+                print(f'{block["type"]}: {block["id"]} has children')
                 has_more = True
                 next_cursor = None
                 while has_more:
-                    children = self.__notion_client.blocks.children.list(
+                    children = self.__list_block_children(
                         block_id=block["id"],
-                        start_cursor=next_cursor,
-                        page_size=100,
+                        next_cursor=next_cursor,
                     )
                     for child in children["results"]:
                         q.put(child)
@@ -114,7 +157,7 @@ class Scaner:
                         has_more = False
 
             if "rich_text" in block[block["type"]]:
-                # print(f'BlockId({block["type"]}): {block["id"]} has rich text')
+                print(f'{block["type"]} {block["id"]} has rich text')
                 word_cnt += sum(
                     [
                         len(rich_text["plain_text"])
@@ -123,7 +166,7 @@ class Scaner:
                 )
 
             if block["type"] == "child_database":
-                # print(f'BlockId({block["type"]}): {block["id"]} is a child database')
+                print(f'{block["type"]} {block["id"]} is a child database')
                 b_cnt, w_cnt = self.__process_database(block["id"])
                 block_cnt += b_cnt
                 word_cnt += w_cnt
@@ -148,8 +191,9 @@ class Scaner:
     def __run(self, id: str):
         return self.__process(id)
 
-    def run(self):
-        for plan in self.__plans:
+    def run(self, insert=True):
+        while not self.__plans.empty():
+            plan = self.__plans.get()
             plan_id, id, notion_auth = plan["id"], plan["root_id"], plan["notion_auth"]
 
             try:
@@ -161,11 +205,30 @@ class Scaner:
                 last_record = self.__last_record(plan_id)
 
                 if not last_record or (block_cnt, word_cnt) != last_record:
-                    self.__insert(plan_id, block_cnt, word_cnt)
+                    if insert:
+                        self.__insert(plan_id, block_cnt, word_cnt)
 
                 print(f"Plan {plan_id} done.")
             except Exception as e:
+                if isinstance(e, APIResponseError):
+                    if (
+                        e.code == APIErrorCode.ObjectNotFound
+                        or e.code == APIErrorCode.Unauthorized
+                    ):
+                        print("Notion client fatal: ", end="")
+                        print(e)
+                        continue
+
+                if "retry" in plan and plan["retry"] == 3:
+                    print("Retry fatal: ", end="")
+                    print(e)
+                    continue
+
+                retry = plan["retry"] + 1 if "retry" in plan else 1
+                self.__plans.put(plan | {"retry": retry})
+                print(f"Retry({id} {retry}): ", end="")
                 print(e)
+                sleep(10)
 
 
 if __name__ == "__main__":
