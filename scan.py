@@ -112,17 +112,20 @@ class Scaner:
         word_cnt = 0
         has_more = True
         next_cursor = None
-        while has_more:
-            print(f"Database {database_id} has more")
-            database = self.__query_database(database_id, next_cursor=next_cursor)
-            if database["has_more"]:
-                next_cursor = database["next_cursor"]
-            else:
-                has_more = False
-            for page in database["results"]:
-                b_cnt, w_cnt = self.__process_page(page["id"])
-                block_cnt += b_cnt
-                word_cnt += w_cnt
+        try:
+            while has_more:
+                print(f"Database {database_id} has more")
+                database = self.__query_database(database_id, next_cursor=next_cursor)
+                if database["has_more"]:
+                    next_cursor = database["next_cursor"]
+                else:
+                    has_more = False
+                for page in database["results"]:
+                    b_cnt, w_cnt = self.__process_page(page["id"])
+                    block_cnt += b_cnt
+                    word_cnt += w_cnt
+        except Exception as e:
+            print(f"Database error: {e}") # TODO: Just skip it
         return block_cnt, word_cnt
 
     def __process_page(self, block_id: str):
