@@ -3,7 +3,7 @@ from enum import Enum
 from os import getenv
 from queue import Queue
 from random import shuffle
-from time import sleep
+from time import sleep, perf_counter
 
 from dotenv import load_dotenv
 from notion_client import APIResponseError
@@ -112,8 +112,9 @@ class Scaner:
         word_cnt = 0
         has_more = True
         next_cursor = None
-        try:
-            while has_more:
+        retry = 0
+        while has_more:
+            try:
                 # print(f"Database {database_id} has more")
                 database = self.__query_database(database_id, next_cursor=next_cursor)
                 if database["has_more"]:
@@ -124,8 +125,20 @@ class Scaner:
                     b_cnt, w_cnt = self.__process_page(page["id"])
                     block_cnt += b_cnt
                     word_cnt += w_cnt
-        except Exception as e:
-            print(f"Database error: {e}") # TODO: Just skip it
+            except Exception as e:
+                if isinstance(e, APIResponseError):
+                    if e.code == APIErrorCode.ObjectNotFound:
+                        print(f"Database error: {e}")  # TODO: Just skip it
+                        break
+                    elif e.code == APIErrorCode.RateLimited:
+                        if retry == 3:
+                            print("Fotal rate limited, skip")
+                            break
+                        retry += 1
+                        print("Rate limited, try again in a few minutes")
+                        sleep(60)
+                        continue
+                print("Database Error: {e}")
         return block_cnt, word_cnt
 
     def __process_page(self, block_id: str):
@@ -203,9 +216,10 @@ class Scaner:
         while not self.__plans.empty():
             plan = self.__plans.get()
             plan_id, id, notion_auth = plan["id"], plan["root_id"], plan["notion_auth"]
-            print(f'Plan {plan_id} started')
+            print(f"Plan {plan_id} started")
 
             try:
+                start_time = perf_counter()
                 # Init notion client here
                 self.__notion_client = NotionClient(auth=notion_auth)
 
@@ -217,7 +231,9 @@ class Scaner:
                     if insert:
                         self.__insert(plan_id, block_cnt, word_cnt)
 
-                print(f"Plan {plan_id} done.")
+                end_time = perf_counter()
+
+                print(f"Plan {plan_id} done, {end_time - start_time:.2f}s")
                 self.__update_last_error(plan_id, None)
             except Exception as e:
                 if isinstance(e, APIResponseError):
