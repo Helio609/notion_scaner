@@ -114,7 +114,7 @@ class Scaner:
         next_cursor = None
         try:
             while has_more:
-                print(f"Database {database_id} has more")
+                # print(f"Database {database_id} has more")
                 database = self.__query_database(database_id, next_cursor=next_cursor)
                 if database["has_more"]:
                     next_cursor = database["next_cursor"]
@@ -136,7 +136,7 @@ class Scaner:
         next_cursor = None
 
         while has_more:
-            print(f"Block {block_id} has more")
+            # print(f"Block {block_id} has more")
             blocks = self.__list_block_children(block_id, next_cursor=next_cursor)
             for block in blocks["results"]:
                 q.put(block)
@@ -149,7 +149,7 @@ class Scaner:
             block = q.get()
 
             if block["has_children"]:
-                print(f'{block["type"]}: {block["id"]} has children')
+                # print(f'{block["type"]}: {block["id"]} has children')
                 has_more = True
                 next_cursor = None
                 while has_more:
@@ -165,7 +165,7 @@ class Scaner:
                         has_more = False
 
             if "rich_text" in block[block["type"]]:
-                print(f'{block["type"]} {block["id"]} has rich text')
+                # print(f'{block["type"]} {block["id"]} has rich text')
                 word_cnt += sum(
                     [
                         len(rich_text["plain_text"])
@@ -174,7 +174,7 @@ class Scaner:
                 )
 
             if block["type"] == "child_database":
-                print(f'{block["type"]} {block["id"]} is a child database')
+                # print(f'{block["type"]} {block["id"]} is a child database')
                 b_cnt, w_cnt = self.__process_database(block["id"])
                 block_cnt += b_cnt
                 word_cnt += w_cnt
@@ -203,6 +203,7 @@ class Scaner:
         while not self.__plans.empty():
             plan = self.__plans.get()
             plan_id, id, notion_auth = plan["id"], plan["root_id"], plan["notion_auth"]
+            print(f'Plan {plan_id} started')
 
             try:
                 # Init notion client here
